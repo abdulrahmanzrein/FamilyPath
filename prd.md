@@ -81,7 +81,14 @@ PostgreSQL (providers, searches, results)
 | Voice in/out | ElevenLabs Conversational AI (Flash v2.5) |
 | Outbound calling | ElevenLabs + Twilio |
 | PII protection | nexos.ai gateway |
-| Frontend | React (scaffolded via Lovable) |
+| Frontend | Vite + React + TypeScript (scaffolded via Lovable) |
+| Styling | Tailwind CSS + shadcn/ui (Radix-based, copied into source) |
+| Animations | Framer Motion (layout transitions, springs, gesture motion) |
+| Visual polish | Aceternity UI / Magic UI (cursor spotlight, animated gradients, beam effects) |
+| Icons | lucide-react |
+| Toasts | sonner (shadcn-native) |
+| Map view | react-map-gl + Mapbox (clinic pins) |
+| Data fetching | @tanstack/react-query |
 | Real-time | WebSocket |
 | Remote trigger | NordVPN Meshnet |
 | QA | Scout (URL substitution on dashboard) |
@@ -250,14 +257,28 @@ updated_at           TIMESTAMP
 - [ ] Result delivered back to user in their chosen language (Punjabi / Arabic / Tagalog / Spanish)
 - [ ] Voice interrupt: user speaks mid-run → hits `/api/voice/interrupt` → agents reprioritize
 
+**Frontend stack setup (first 90 minutes — do this before any feature code)**
+
+The stack is chosen to avoid the "AI-generated default" look. Goal: dark muted backgrounds, animated gradients, cursor-following spotlight on hero, smooth layout transitions when agent cards reorder.
+
+- [ ] Scaffold Vite + React + TypeScript via Lovable (or `npm create vite@latest frontend -- --template react-ts`)
+- [ ] Install Tailwind CSS, run `npx shadcn@latest init` — copies Radix-based components into `src/components/ui/` (you own them, edit freely)
+- [ ] Install: `framer-motion`, `lucide-react`, `sonner`, `@tanstack/react-query`
+- [ ] Install map: `react-map-gl` + `mapbox-gl` (Mapbox free tier covers hackathon)
+- [ ] Pick one Aceternity UI or Magic UI component for landing page hero (spotlight/cursor-follow or animated gradient) — copy-paste from `ui.aceternity.com` or `magicui.design`, no install needed
+- [ ] Establish design tokens: stick to shadcn's `bg-background`, `text-foreground`, `border-border` — no custom hex codes; this keeps every screen coherent automatically
+
+**What NOT to use:** MUI / Material UI / Ant Design / Chakra (recognizable "library look"); Next.js (SSR overhead we don't need); custom CSS from scratch (too slow under time pressure).
+
 **Frontend (via Lovable)**
-- [ ] Onboarding form: postal code, language preference, insurance type
-- [ ] Live dashboard: one card per agent with animated status (searching / found / calling / confirmed / failed)
-- [ ] Map view: clinic pins colored by status
+- [ ] Onboarding form: postal code, language preference, insurance type — shadcn `Form` + `Input` + `Select`
+- [ ] Live dashboard: one card per agent with animated status (searching / found / calling / confirmed / failed) — shadcn `Card` + Framer Motion `layout` prop so cards reorder smoothly when one resolves before another
+- [ ] Map view: clinic pins colored by status — react-map-gl + Mapbox dark style
 - [ ] Clinic card detail: doctor name, languages, IFHP status, phone, address
 - [ ] Live call transcript panel (streams what the agent said and what the receptionist said)
 - [ ] Confirmed match card with one-tap "Call this clinic" button
 - [ ] WebSocket consumer: connect to `/ws/searches/{id}`, update cards on every event
+- [ ] Toast notifications via `sonner` for status pop-ups ("Found 3 clinics", "Calling Appletree…")
 
 **Sponsor integrations (P2)**
 - [ ] **ElevenLabs** — voice input, outbound calls, multilingual response to user
