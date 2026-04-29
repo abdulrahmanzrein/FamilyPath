@@ -1,1 +1,45 @@
+# Local-only Claude context (per-machine, not shared)
 CLAUDE.md
+
+# ---------- Secrets / env ----------
+.env
+.env.*
+!.env.example
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- Node / frontend ----------
+node_modules/
+dist/
+build/
+.vite/
+.next/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---------- Editor / OS ----------
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---------- Docker / data ----------
+# Local Postgres data dir if anyone uses a bind mount instead of named volume
+postgres-data/
+
+# ---------- Project artifacts ----------
+# ODHF CSV is downloaded once and seeded into Postgres; don't commit the raw file
+backend/data/odhf_*.csv
