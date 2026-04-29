@@ -6,7 +6,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,7 +30,7 @@ class Provider(Base):
     accepts_ohip: Mapped[bool | None] = mapped_column(nullable=True)
     accepting_new_patients: Mapped[bool | None] = mapped_column(nullable=True)  # null = unknown, voice call confirms
     source: Mapped[str] = mapped_column(String)  # odhf | cpso | appletree | mci | ifhp
-    last_scraped_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Search(Base):
@@ -42,8 +42,8 @@ class Search(Base):
     language: Mapped[str] = mapped_column(String)
     insurance_type: Mapped[str] = mapped_column(String)  # ohip | ifhp | uhip | waiting_period
     status: Mapped[str] = mapped_column(String, default="pending")  # pending | running | completed | failed
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SearchResult(Base):
@@ -60,4 +60,4 @@ class SearchResult(Base):
     confirmed_accepting: Mapped[bool | None] = mapped_column(nullable=True)  # set after voice call
     source: Mapped[str] = mapped_column(String)  # which agent reported this row
     clinic_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

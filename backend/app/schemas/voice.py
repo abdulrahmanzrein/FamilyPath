@@ -8,4 +8,5 @@ from pydantic import BaseModel
 
 class VoiceInterruptRequest(BaseModel):
     action: Literal["skip", "prioritize", "cancel"]
-    source: str  # odhf | cpso | appletree | mci | ifhp
+    # required when action is skip/prioritize; optional for cancel — route handler enforces
+    source: str | None = None  # odhf | cpso | appletree | mci | ifhp

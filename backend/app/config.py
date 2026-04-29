@@ -1,13 +1,16 @@
 # reads .env and gives us a typed `settings` object
 # so we don't sprinkle os.getenv() all over the place
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     # tells pydantic where to look for the env file
+    # absolute path so settings load no matter what cwd uvicorn or one-off scripts run from
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).resolve().parent.parent / ".env",
         env_file_encoding="utf-8",
         extra="ignore",  # don't crash if .env has stuff we don't use
     )
