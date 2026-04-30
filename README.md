@@ -1,49 +1,59 @@
 # MedBridge (FamilyPath)
 
-Voice-assisted family doctor discovery for newcomers in Canada. This repository contains the **MedBridge** hackathon project layout; **product requirements and scope** live in [`prd.md`](prd.md).
+Voice-first family-doctor finder for newcomers in Canada. Five agents fan out across clinic directories, place a real outbound call to confirm acceptance, and report back through a live React dashboard.
 
-## Current status
+Spec: [`prd.md`](prd.md).
 
-The repo is a **skeleton only**: directory and file placeholders are present; **application code is not implemented yet** (empty `backend/`, `frontend/`, and config stubs). Use `prd.md` as the build spec when you fill in each layer.
+## Stack
 
-## Repository layout
+- **Backend** — FastAPI + SQLAlchemy (async) + Postgres, WebSocket hub, ElevenLabs outbound calls.
+- **Frontend** — Vite + React + TypeScript + Tailwind.
+- **LLM** — Claude (via nexos.ai gateway) and OpenAI for the navigator chatbot.
 
-| Area | Path | Intended owner |
-|------|------|----------------|
-| Product spec | `prd.md` | Whole team |
-| Backend API, DB, agents, WebSocket | `backend/app/` | Person 1 (backend / agents) |
-| ODHF seed script | `backend/scripts/seed_odfh.py` | Person 1 |
-| Frontend (Vite + React) | `frontend/` | Person 2 (UI / voice) |
-| PostgreSQL (to be defined) | `docker-compose.yml` | Person 1 |
-| Nightly job placeholder | `.github/workflows/nightly-scrape.yml` | Person 1 |
+## Layout
 
-### Backend (`backend/app/`)
+```
+backend/
+  app/
+    main.py            FastAPI entry
+    config.py          .env-backed settings
+    api/               searches, providers, voice (interrupt + post-call), navigator
+    agents/            fake_runner, voice_caller, call_state, llm_gateway
+    db/                models, session, base
+    schemas/           pydantic request/response shapes
+    ws/                WebSocket hub
+  scripts/seed_odhf.py ODHF seed loader
+  tests/
+frontend/
+  src/
+    App.tsx            onboarding form + live dashboard
+    api/client.ts      backend client
+    hooks/             useSearchWebSocket
+    components/        AgentGrid, ClinicMap, ui/
+    voice/             ElevenLabs session
+docker-compose.yml     postgres
+.github/workflows/     nightly scrape
+```
 
-- `main.py` — FastAPI entry (not yet implemented).
-- `api/` — HTTP routes: searches, providers, voice interrupt.
-- `db/` — SQLAlchemy models and session.
-- `schemas/` — Request/response models.
-- `ws/` — WebSocket broadcasting for live search updates.
-- `agents/` — LangGraph supervisor, workers, LLM gateway (nexos / Anthropic per PRD).
+## Run it
 
-### Frontend (`frontend/`)
+```bash
+# 1. postgres
+docker compose up -d postgres
 
-- Vite + TypeScript layout: `App`, API client, WebSocket hook, agent grid, ElevenLabs integration stub.
+# 2. backend
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # fill in keys
+uvicorn app.main:app --reload   # http://localhost:8000
 
-## Getting started (after implementation)
-
-These steps will apply once code and dependencies exist; they are **placeholders** for now.
-
-1. Copy `backend/.env.example` to `backend/.env` and set API keys per `prd.md`.
-2. Start PostgreSQL (define `docker-compose.yml` or use a managed DB); set `DATABASE_URL` accordingly.
-3. Install backend: `cd backend && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
-4. Install frontend: `cd frontend && npm install`
-5. Run services as documented in your future `main.py` / `package.json` scripts.
+# 3. frontend (new terminal)
+cd frontend
+npm install
+npm run dev   # http://localhost:5173
+```
 
 ## Branches
 
-Work is expected on feature branches (for example `backend/agents`). Merge to `main` via pull request when review is complete.
-
-## License / demo
-
-See `prd.md` for sponsor integrations, demo flow, and constraints (PII handling, data sources, and voice limitations).
+`main` is the demo branch. Feature work goes on `frontend/main` or `backend/agents` and merges via PR.
