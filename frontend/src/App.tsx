@@ -12,10 +12,10 @@ type Page = 'home' | 'find'
 
 // Demo clinic pins for the map — Brampton / Scarborough per PRD data sources
 const DEMO_CLINICS = [
-  { id: '1', name: 'Heart Lake Health Centre',        address: '55 Quarry Edge Dr, Brampton',  lng: -79.8021, lat: 43.7530 },
-  { id: '2', name: 'Bramalea Community Clinic',        address: '150 Central Park Dr, Brampton', lng: -79.7050, lat: 43.7100 },
-  { id: '3', name: 'Sandalwood Medical Clinic',        address: '475 Sandalwood Pkwy E, Brampton', lng: -79.7823, lat: 43.7489 },
-  { id: '4', name: 'Scarborough Newcomer Health Centre', address: '2425 Eglinton Ave E, Scarborough', lng: -79.2620, lat: 43.7597 },
+  { id: '1', source: 'odhf', name: 'Heart Lake Health Centre',        address: '55 Quarry Edge Dr, Brampton',  lng: -79.8021, lat: 43.7530 },
+  { id: '2', source: 'cpso', name: 'Bramalea Community Clinic',        address: '150 Central Park Dr, Brampton', lng: -79.7050, lat: 43.7100 },
+  { id: '3', source: 'appletree', name: 'Sandalwood Medical Clinic',        address: '475 Sandalwood Pkwy E, Brampton', lng: -79.7823, lat: 43.7489 },
+  { id: '4', source: 'ifhp', name: 'Scarborough Newcomer Health Centre', address: '2425 Eglinton Ave E, Scarborough', lng: -79.2620, lat: 43.7597 },
 ]
 
 function App() {
@@ -61,6 +61,15 @@ function App() {
   }
 
   const searched = searchId !== null
+
+  function clinicMarkerClass(source: AgentSource) {
+    const status = agentMap[source]?.status
+    if (status === 'confirmed') return 'bg-emerald-500 ring-emerald-200'
+    if (status === 'found' || status === 'calling') return 'bg-amber-400 ring-amber-200'
+    if (status === 'failed') return 'bg-rose-500 ring-rose-200'
+    if (status === 'searching') return 'bg-blue-500 ring-blue-200'
+    return 'bg-slate-400 ring-slate-200'
+  }
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 antialiased">
@@ -409,7 +418,7 @@ function App() {
               {searched && DEMO_CLINICS.map(c => (
                 <MapMarker key={c.id} longitude={c.lng} latitude={c.lat}>
                   <MarkerContent>
-                    <div className="bg-emerald-500 w-4 h-4 rounded-full border-2 border-white shadow-md" />
+                    <div className={`${clinicMarkerClass(c.source as AgentSource)} w-4 h-4 rounded-full border-2 border-white shadow-md ring-4 transition-colors duration-300`} />
                   </MarkerContent>
                   <MarkerPopup closeButton>
                     <p className="font-semibold text-sm">{c.name}</p>
@@ -440,11 +449,11 @@ function App() {
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <div className="bg-emerald-500 w-3 h-3 rounded-full border-2 border-white shadow ring-1 ring-slate-200 shrink-0" />
-                    <span className="text-xs text-slate-700 font-medium">Confirmed match</span>
+                    <span className="text-xs text-slate-700 font-medium">User waitlisted</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="bg-amber-400 w-3 h-3 rounded-full border-2 border-white shadow ring-1 ring-slate-200 shrink-0" />
-                    <span className="text-xs text-slate-700 font-medium">Call in progress</span>
+                    <span className="text-xs text-slate-700 font-medium">Waitlist open / calling</span>
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-100">

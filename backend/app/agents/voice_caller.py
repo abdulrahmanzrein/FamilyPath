@@ -19,6 +19,7 @@ outbound call internally — we never touch Twilio directly here).
 
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 import httpx
@@ -40,12 +41,34 @@ _ELEVENLABS_OUTBOUND_URL = (
 _REQUEST_TIMEOUT_SECONDS = 30.0
 
 
+def _normalize_phone_number(phone_number: str) -> str:
+    """Normalize common North American phone formats into E.164.
+
+    Accepts inputs like:
+    - `3432541738`
+    - `343 254 1738`
+    - `(343) 254-1738`
+    - `+13432541738`
+
+    Returns a `+1XXXXXXXXXX` string when possible.
+    """
+    digits = re.sub(r"\D", "", phone_number)
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    if phone_number.startswith("+") and digits:
+        return f"+{digits}"
+    raise ValueError(f"invalid phone number format: {phone_number!r}")
+
+
 async def place_outbound_call(
     phone_number: str,
     clinic_name: str,
     insurance_type: str,
     search_id: UUID,
     source: str,
+    extra_dynamic_variables: dict[str, str] | None = None,
 ) -> str:
     """Place an outbound call via ElevenLabs Conversational AI.
 
@@ -55,6 +78,8 @@ async def place_outbound_call(
 
     Returns the ElevenLabs conversation_id.
     """
+    phone_number = _normalize_phone_number(phone_number)
+
     if not settings.elevenlabs_api_key:
         raise RuntimeError(
             "elevenlabs_api_key is not configured — cannot place outbound call"
@@ -79,6 +104,8 @@ async def place_outbound_call(
         "search_id": str(search_id),
         "source": source,
     }
+    if extra_dynamic_variables:
+        dynamic_variables.update(extra_dynamic_variables)
 
     payload = {
         "agent_id": settings.elevenlabs_agent_id,

@@ -33,17 +33,17 @@ function StatusBadge({ status }: { status: AgentStatusValue }) {
       icon: <Loader2 className="w-3 h-3 animate-spin" />,
     },
     found: {
-      label: 'Match found',
-      cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      label: 'Waitlist open',
+      cls: 'bg-amber-50 text-amber-700 border-amber-200',
       icon: <Search className="w-3 h-3" />,
     },
     calling: {
-      label: 'Calling…',
+      label: 'Calling waitlist…',
       cls: 'bg-amber-50 text-amber-700 border-amber-200',
       icon: <Phone className="w-3 h-3 animate-pulse" />,
     },
     confirmed: {
-      label: 'Confirmed',
+      label: 'Waitlisted',
       cls: 'bg-emerald-100 text-emerald-800 border-emerald-300',
       icon: <CheckCircle2 className="w-3 h-3" />,
     },
@@ -65,9 +65,9 @@ function StatusBadge({ status }: { status: AgentStatusValue }) {
 // Card border highlight by status
 function cardBorder(status: AgentStatusValue): string {
   if (status === 'confirmed') return 'border-emerald-300 shadow-emerald-100'
-  if (status === 'calling') return 'border-amber-300 shadow-amber-100'
+  if (status === 'found' || status === 'calling') return 'border-amber-300 shadow-amber-100'
   if (status === 'failed') return 'border-rose-200'
-  if (status === 'searching' || status === 'found') return 'border-blue-200'
+  if (status === 'searching') return 'border-blue-200'
   return 'border-slate-200'
 }
 

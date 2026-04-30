@@ -24,29 +24,29 @@ SOURCE_SCRIPTS: dict[str, list[tuple[str, str | None, str, float]]] = {
     "odhf": [
         ("pending", None, "queued", 0.0),
         ("searching", None, "looking up clinics in postal area", 1.5),
-        ("found", "Heart Lake Health Centre", "match found — IFHP accepted", 1.5),
-        ("calling", "Heart Lake Health Centre", "calling clinic to verify", 2.0),
-        ("confirmed", "Heart Lake Health Centre", "accepting new IFHP patients", 4.5),
+        ("found", "Heart Lake Health Centre", "clinic is accepting waitlist requests", 1.5),
+        ("calling", "Heart Lake Health Centre", "calling clinic to add user to waitlist", 2.0),
+        ("confirmed", "Heart Lake Health Centre", "user added to waitlist", 4.5),
     ],
     "cpso": [
         ("pending", None, "queued", 0.0),
         ("searching", None, "scanning CPSO register for Punjabi GPs", 1.5),
-        ("found", "Bramalea Community Clinic", "match found — 2 GPs listed", 2.0),
-        ("calling", "Bramalea Community Clinic", "calling clinic to verify", 2.0),
-        ("confirmed", "Bramalea Community Clinic", "accepting new patients", 2.0),
+        ("found", "Bramalea Community Clinic", "clinic is accepting waitlist requests", 2.0),
+        ("calling", "Bramalea Community Clinic", "calling clinic to add user to waitlist", 2.0),
+        ("confirmed", "Bramalea Community Clinic", "user added to waitlist", 2.0),
     ],
     "appletree": [
         ("pending", None, "queued", 0.0),
         ("searching", None, "checking Appletree clinic pages", 1.0),
-        ("found", "Sandalwood Medical Clinic", "match found — walk-ins accepted", 1.5),
-        ("calling", "Sandalwood Medical Clinic", "calling clinic to verify", 2.0),
-        ("confirmed", "Sandalwood Medical Clinic", "accepting IFHP", 3.0),
+        ("found", "Sandalwood Medical Clinic", "clinic is accepting waitlist requests", 1.5),
+        ("calling", "Sandalwood Medical Clinic", "calling clinic to add user to waitlist", 2.0),
+        ("confirmed", "Sandalwood Medical Clinic", "user added to waitlist", 3.0),
     ],
     "ifhp": [
         ("pending", None, "queued", 0.0),
         ("searching", None, "querying Medavie IFHP directory", 2.0),
-        ("found", "Scarborough Newcomer Health Centre", "match found — IFHP listed", 1.5),
-        ("calling", "Scarborough Newcomer Health Centre", "voice call in progress", 2.0),
+        ("found", "Scarborough Newcomer Health Centre", "clinic is accepting waitlist requests", 1.5),
+        ("calling", "Scarborough Newcomer Health Centre", "calling clinic to add user to waitlist", 2.0),
         # stays in "calling" — call still ringing when search wraps up
     ],
     "mci": [
@@ -64,6 +64,8 @@ async def _simulate_source(
     search_id: UUID,
     source: str,
     script: list[tuple[str, str | None, str, float]],
+    patient_callback_triggered: asyncio.Event,
+    patient_callback_lock: asyncio.Lock,
 ) -> None:
     # one DB session per source so they don't fight over a shared one
     async with SessionLocal() as session:
@@ -123,6 +125,21 @@ async def _simulate_source(
                         )
                     )
 
+            # As soon as any clinic confirms the waitlist, call the user back.
+            # We only do this once per search, even if multiple sources confirm.
+            if status == "confirmed":
+                async with patient_callback_lock:
+                    if not patient_callback_triggered.is_set():
+                        patient_callback_triggered.set()
+                        asyncio.create_task(
+                            _patient_callback(
+                                search_id,
+                                confirmed_clinic=clinic_name or source,
+                                source=source,
+                                waitlist_message=message,
+                            )
+                        )
+
 
 async def _place_call_safe(
     phone_number: str,
@@ -148,15 +165,21 @@ async def _place_call_safe(
         logger.warning("ElevenLabs outbound call failed (non-fatal): %s", exc)
 
 
-async def _patient_callback(search_id: UUID) -> None:
-    """After all sources finish, call the patient's phone in their language
-    to confirm any waitlist additions or successful matches."""
+async def _patient_callback(
+    search_id: UUID,
+    *,
+    confirmed_clinic: str,
+    source: str,
+    waitlist_message: str,
+) -> None:
+    """Call the patient as soon as a clinic successfully confirms the waitlist."""
     async with SessionLocal() as session:
         search = await session.get(Search, search_id)
         if search is None:
             return
         patient_phone = search.phone
         language = search.language
+        insurance_type = search.insurance_type
 
     if not patient_phone:
         logger.info("no patient phone for search %s — skipping callback", search_id)
@@ -169,19 +192,23 @@ async def _patient_callback(search_id: UUID) -> None:
     try:
         from app.agents.voice_caller import place_outbound_call  # local import avoids circular deps
 
-        # Re-use place_outbound_call; pass the patient's language as insurance_type
-        # placeholder so the dynamic_variables reach the ElevenLabs agent prompt.
         conversation_id = await place_outbound_call(
             phone_number=patient_phone,
-            clinic_name="confirmed clinic",
-            insurance_type=language,
+            clinic_name=confirmed_clinic,
+            insurance_type=insurance_type,
             search_id=search_id,
-            source="patient_callback",
+            source=source,
+            extra_dynamic_variables={
+                "call_type": "patient_callback",
+                "patient_language": language,
+                "result_message": waitlist_message,
+            },
         )
         logger.info(
-            "Patient callback queued for search %s — conversation_id=%s",
+            "Patient callback queued for search %s — conversation_id=%s — clinic=%s",
             search_id,
             conversation_id,
+            confirmed_clinic,
         )
     except Exception as exc:
         logger.warning("Patient callback failed (non-fatal): %s", exc)
@@ -189,11 +216,21 @@ async def _patient_callback(search_id: UUID) -> None:
 
 # entry point — runs all 5 sources in parallel, then fires patient callback
 async def run_fake_search(search_id: UUID) -> None:
+    patient_callback_triggered = asyncio.Event()
+    patient_callback_lock = asyncio.Lock()
+
     await asyncio.gather(
-        *(_simulate_source(search_id, source, script) for source, script in SOURCE_SCRIPTS.items())
+        *(
+            _simulate_source(
+                search_id,
+                source,
+                script,
+                patient_callback_triggered,
+                patient_callback_lock,
+            )
+            for source, script in SOURCE_SCRIPTS.items()
+        )
     )
-    # all workers done — call the patient back in their language
-    await _patient_callback(search_id)
 
     # mark the parent search row completed
     async with SessionLocal() as session:
