@@ -54,10 +54,10 @@ def _normalize_phone_number(phone_number: str) -> str:
     """Normalize common North American phone formats into E.164.
 
     Accepts inputs like:
-    - `3432541738`
-    - `343 254 1738`
-    - `(343) 254-1738`
-    - `+13432541738`
+    - `4165550100`
+    - `416 555 0100`
+    - `(416) 555-0100`
+    - `+14165550100`
 
     Returns a `+1XXXXXXXXXX` string when possible.
     """
