@@ -1,40 +1,63 @@
 import { useState } from 'react'
 import { Map, MapMarker, MarkerContent, MarkerPopup, MapControls } from '@/components/ui/map'
 import { Button } from '@/components/ui/button'
-import { Heart, MapPin, Search, PhoneCall, ClipboardList, ShieldCheck, Stethoscope, ExternalLink, ArrowRight, CheckCircle2, Phone, Globe2, Lock, Sparkles } from 'lucide-react'
+import { AgentGrid } from '@/components/AgentGrid'
+import type { AgentSource, AgentStatus } from '@/hooks/useSearchWebSocket'
+import { useSearchWebSocket } from '@/hooks/useSearchWebSocket'
+import { startSearch } from '@/api/client'
+import { Heart, MapPin, Search, PhoneCall, ClipboardList, ShieldCheck, Stethoscope, ArrowRight, CheckCircle2, Phone, Globe2, Lock, Sparkles, Loader2 } from 'lucide-react'
 
 type Page = 'home' | 'find'
-type Availability = 'available' | 'unavailable'
 
-const MARKER_COLOR: Record<Availability, string> = {
-  available:   'bg-emerald-500',
-  unavailable: 'bg-rose-500',
-}
-
-const MARKER_LABEL: Record<Availability, string> = {
-  available:   'Taking new patients',
-  unavailable: 'Not taking patients',
-}
-
-const BADGE_STYLE: Record<Availability, string> = {
-  available:   'bg-emerald-50 text-emerald-700 border-emerald-200',
-  unavailable: 'bg-rose-50 text-rose-700 border-rose-200',
-}
-
-const CLINICS = [
-  { id: '1', name: 'Grand River Medical',     address: '835 King St W, Kitchener',       lng: -80.4927, lat: 43.4516, availability: 'unavailable' as Availability, website: 'www.grandrivermedical.ca' },
-  { id: '2', name: 'Waterloo Family Health',  address: '180 King St S, Waterloo',        lng: -80.5200, lat: 43.4650, availability: 'unavailable' as Availability, website: 'www.waterloofamilyhealth.ca' },
-  { id: '3', name: 'Uptown Medical Centre',   address: '75 King St N, Waterloo',         lng: -80.5180, lat: 43.4744, availability: 'unavailable' as Availability, website: 'www.uptownmedical.ca' },
-  { id: '4', name: 'Cambridge Health Centre', address: '700 Coronation Blvd, Cambridge', lng: -80.3123, lat: 43.3601, availability: 'unavailable' as Availability, website: 'www.cambridgehealthcentre.ca' },
+// Demo clinic pins for the map — Brampton / Scarborough per PRD data sources
+const DEMO_CLINICS = [
+  { id: '1', name: 'Heart Lake Health Centre',        address: '55 Quarry Edge Dr, Brampton',  lng: -79.8021, lat: 43.7530 },
+  { id: '2', name: 'Bramalea Community Clinic',        address: '150 Central Park Dr, Brampton', lng: -79.7050, lat: 43.7100 },
+  { id: '3', name: 'Sandalwood Medical Clinic',        address: '475 Sandalwood Pkwy E, Brampton', lng: -79.7823, lat: 43.7489 },
+  { id: '4', name: 'Scarborough Newcomer Health Centre', address: '2425 Eglinton Ave E, Scarborough', lng: -79.2620, lat: 43.7597 },
 ]
 
 function App() {
   const [page, setPage] = useState<Page>('home')
   const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
   const [postal, setPostal] = useState('')
   const [language, setLanguage] = useState('')
   const [insurance, setInsurance] = useState('')
-  const [searched, setSearched] = useState(false)
+  const [searchId, setSearchId] = useState<string | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const { agents, connected } = useSearchWebSocket(searchId)
+
+  // Build a map keyed by source for the AgentGrid
+  const agentMap = agents.reduce<Partial<Record<AgentSource, AgentStatus>>>((acc, a) => {
+    acc[a.source] = a
+    return acc
+  }, {})
+
+  async function handleSearch() {
+    if (!name.trim() || !postal.trim() || !language || !insurance) return
+    const insuranceValue = insurance === 'waiting' ? 'waiting_period' : insurance as 'ohip' | 'ifhp' | 'uhip' | 'waiting_period'
+    setSearching(true)
+    setError(null)
+    try {
+      const res = await startSearch({
+        name: name.trim(),
+        phone: phone.trim(),
+        postal_code: postal.trim(),
+        language,
+        insurance_type: insuranceValue,
+      })
+      setSearchId(res.search_id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Search failed — is the backend running?')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const searched = searchId !== null
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 antialiased">
@@ -43,7 +66,7 @@ function App() {
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center shadow-sm shadow-blue-600/20 group-hover:shadow-blue-600/40 group-hover:scale-105 transition-all duration-200">
             <Heart className="w-4.5 h-4.5 text-white" fill="currentColor" />
           </div>
-          <span className="text-lg font-bold text-slate-900 tracking-tight">FamilyPath</span>
+          <span className="text-lg font-bold text-slate-900 tracking-tight">MedBridge</span>
         </Button>
         <nav className="flex items-center gap-1">
           <Button variant="ghost" onClick={() => setPage('home')} className={`h-auto text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 ${page === 'home' ? 'text-blue-700 bg-blue-50 hover:bg-blue-50 hover:text-blue-700' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Home</Button>
@@ -67,7 +90,7 @@ function App() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                 </span>
-                Now serving newcomers across Ontario
+                Now serving newcomers across Brampton & Scarborough
               </div>
               <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-slate-900 max-w-4xl leading-[1.05]">
                 Find a family doctor
@@ -98,8 +121,8 @@ function App() {
           <section className="border-y border-slate-200 bg-slate-50/50">
             <div className="max-w-6xl mx-auto px-6 md:px-10 py-10 grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
               {[
-                { stat: '5,000+', label: 'Verified clinics' },
-                { stat: '7', label: 'Languages supported' },
+                { stat: '10+', label: 'Verified clinics' },
+                { stat: '4', label: 'Languages supported' },
                 { stat: '< 5 min', label: 'Average search time' },
                 { stat: '100%', label: 'Free for patients' },
               ].map(s => (
@@ -143,7 +166,7 @@ function App() {
             <div className="max-w-6xl mx-auto px-6 md:px-10 py-20 md:py-24">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
                 <div>
-                  <p className="text-xs font-semibold text-blue-700 uppercase tracking-[0.15em] mb-3">Why FamilyPath</p>
+                  <p className="text-xs font-semibold text-blue-700 uppercase tracking-[0.15em] mb-3">Why MedBridge</p>
                   <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-900 leading-tight">Built for newcomers, trusted by Ontarians.</h2>
                   <p className="text-slate-600 text-base mt-4 leading-relaxed">Finding a family doctor in Ontario is hard. We make it simple, multilingual, and fully free — no OHIP card required to get started.</p>
                 </div>
@@ -197,7 +220,7 @@ function App() {
                 <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center">
                   <Heart className="w-3 h-3 text-white" fill="currentColor" />
                 </div>
-                <p>&copy; 2026 FamilyPath. Healthcare navigation for everyone.</p>
+                <p>&copy; 2026 MedBridge. Healthcare navigation for everyone.</p>
               </div>
               <p className="text-slate-400">Built for ConHacks 2026</p>
             </div>
@@ -222,10 +245,17 @@ function App() {
                 <input className="border border-slate-200 rounded-lg px-3.5 py-3 text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all duration-200" placeholder="Jane Doe" value={name} onChange={e => setName(e.target.value)} />
               </div>
               <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-700">Phone number</label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <input className="w-full border border-slate-200 rounded-lg pl-9 pr-3.5 py-3 text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all duration-200" placeholder="+1 (416) 555-0100" value={phone} onChange={e => setPhone(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-slate-700">Postal code</label>
                 <div className="relative">
                   <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  <input className="w-full border border-slate-200 rounded-lg pl-9 pr-3.5 py-3 text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all duration-200" placeholder="N2L 3G1" value={postal} onChange={e => setPostal(e.target.value)} />
+                  <input className="w-full border border-slate-200 rounded-lg pl-9 pr-3.5 py-3 text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all duration-200" placeholder="L6V 4K2" value={postal} onChange={e => setPostal(e.target.value)} />
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -251,52 +281,56 @@ function App() {
                   <option value="waiting">Waiting Period (No coverage yet)</option>
                 </select>
               </div>
-              <Button onClick={() => setSearched(true)} className="group bg-blue-700 text-white rounded-lg py-3 h-auto text-sm font-semibold hover:bg-blue-800 active:bg-blue-900 transition-all duration-200 inline-flex items-center justify-center gap-2 shadow-sm shadow-blue-700/20 hover:shadow-blue-700/40 mt-1">
-                <Search className="w-4 h-4" />
-                Find doctors
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform duration-200" />
+              {error && (
+                <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{error}</p>
+              )}
+              <Button
+                onClick={handleSearch}
+                disabled={searching || !name.trim() || !postal.trim() || !language || !insurance}
+                className="group bg-blue-700 text-white rounded-lg py-3 h-auto text-sm font-semibold hover:bg-blue-800 active:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 inline-flex items-center justify-center gap-2 shadow-sm shadow-blue-700/20 hover:shadow-blue-700/40 mt-1"
+              >
+                {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                {searching ? 'Starting search…' : 'Find doctors'}
+                {!searching && <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform duration-200" />}
               </Button>
               <p className="inline-flex items-center justify-center gap-1.5 text-xs text-slate-500 leading-relaxed">
                 <Lock className="w-3 h-3" />
                 Your information stays private and encrypted.
               </p>
             </div>
+
             {searched && (
               <div className="border-t border-slate-100 bg-slate-50/50 px-7 py-6 flex flex-col gap-3">
-                <div className="flex items-baseline justify-between">
-                  <h3 className="text-sm font-bold text-slate-900">Results</h3>
-                  <span className="text-xs text-slate-500"><span className="font-semibold text-slate-900">{CLINICS.length}</span> clinics found</span>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-bold text-slate-900">Agent status</h3>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${connected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                    {connected ? 'Live' : 'Connecting…'}
+                  </span>
                 </div>
-                <div className="flex flex-col gap-2.5">
-                  {CLINICS.map(c => (
-                    <div key={c.id} className="group bg-white rounded-xl p-4 border border-slate-200 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                      <div className="flex items-start gap-3">
-                        <div className="shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 flex items-center justify-center">
-                          <Stethoscope className="w-4.5 h-4.5 text-blue-700" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="font-semibold text-slate-900 text-sm leading-tight">{c.name}</p>
-                            <span className={`shrink-0 inline-flex items-center gap-1 ${BADGE_STYLE[c.availability]} border text-[10px] font-semibold px-1.5 py-0.5 rounded-full`}>
-                              <span className={`${MARKER_COLOR[c.availability]} w-1.5 h-1.5 rounded-full`} />
-                              {c.availability === 'available' ? 'Open' : 'Full'}
-                            </span>
+                <AgentGrid agentMap={agentMap} />
+
+                {/* Confirmed match list */}
+                {agents.some(a => a.status === 'confirmed') && (
+                  <div className="mt-2 flex flex-col gap-2.5">
+                    <h3 className="text-sm font-bold text-slate-900">Confirmed matches</h3>
+                    {agents.filter(a => a.status === 'confirmed').map(a => (
+                      <div key={a.source} className="bg-white rounded-xl p-4 border border-emerald-300 shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <div className="shrink-0 w-10 h-10 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center">
+                            <Stethoscope className="w-4 h-4 text-emerald-700" />
                           </div>
-                          <p className="text-xs text-slate-500 mt-1 leading-relaxed flex items-start gap-1">
-                            <MapPin className="w-3 h-3 mt-0.5 shrink-0" />
-                            {c.address}
-                          </p>
-                          <a href={`https://${c.website}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-800 mt-2 group/link">
-                            <span className="group-hover/link:underline">{c.website}</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-slate-900 text-sm leading-tight">{a.clinic_name}</p>
+                            <p className="text-xs text-slate-500 mt-1">{a.message}</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
+
             <div className="mt-auto px-7 py-5 border-t border-slate-200 bg-blue-50/50">
               <div className="flex items-start gap-3">
                 <div className="shrink-0 w-9 h-9 rounded-lg bg-blue-700 flex items-center justify-center shadow-sm">
@@ -311,17 +345,17 @@ function App() {
           </aside>
 
           <div className="flex-1 relative">
-            <Map center={[-80.4927, 43.4516]} zoom={12} theme="light">
+            {/* Map centred on Brampton */}
+            <Map center={[-79.7609, 43.7315]} zoom={11} theme="light">
               <MapControls />
-              {searched && CLINICS.map(c => (
+              {searched && DEMO_CLINICS.map(c => (
                 <MapMarker key={c.id} longitude={c.lng} latitude={c.lat}>
                   <MarkerContent>
-                    <div className={`${MARKER_COLOR[c.availability]} w-4 h-4 rounded-full border-2 border-white shadow-md`} />
+                    <div className="bg-emerald-500 w-4 h-4 rounded-full border-2 border-white shadow-md" />
                   </MarkerContent>
                   <MarkerPopup closeButton>
                     <p className="font-semibold text-sm">{c.name}</p>
                     <p className="text-xs text-gray-500">{c.address}</p>
-                    <p className={`text-xs mt-1 font-medium ${MARKER_COLOR[c.availability].replace('bg-', 'text-')}`}>{MARKER_LABEL[c.availability]}</p>
                   </MarkerPopup>
                 </MapMarker>
               ))}
@@ -345,16 +379,18 @@ function App() {
                   <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">Clinic status</p>
                   <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Legend</span>
                 </div>
-                <div className="flex flex-col gap-2.5">
-                  {(['available', 'unavailable'] as Availability[]).map(a => (
-                    <div key={a} className="flex items-center gap-3">
-                      <div className={`${MARKER_COLOR[a]} w-3 h-3 rounded-full border-2 border-white shadow ring-1 ring-slate-200 shrink-0`} />
-                      <span className="text-xs text-slate-700 font-medium">{MARKER_LABEL[a]}</span>
-                    </div>
-                  ))}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-emerald-500 w-3 h-3 rounded-full border-2 border-white shadow ring-1 ring-slate-200 shrink-0" />
+                    <span className="text-xs text-slate-700 font-medium">Confirmed match</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="bg-amber-400 w-3 h-3 rounded-full border-2 border-white shadow ring-1 ring-slate-200 shrink-0" />
+                    <span className="text-xs text-slate-700 font-medium">Call in progress</span>
+                  </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-100">
-                  <p className="text-[11px] text-slate-500 leading-relaxed">Showing <span className="font-semibold text-slate-700">{CLINICS.length}</span> clinics near your area. Click a marker for details.</p>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">Showing {DEMO_CLINICS.length} clinics in Brampton / Scarborough. Click a marker for details.</p>
                 </div>
               </div>
             )}
