@@ -23,11 +23,7 @@ from app.ws.hub import hub
 
 logger = logging.getLogger(__name__)
 
-_CLINIC_CALL_COMPLETION_TIMEOUT_SECONDS = 90.0
-# Timer fallback: if the ElevenLabs post-call webhook hasn't arrived this many
-# seconds after we placed the clinic call, mark it complete anyway so the
-# patient callback still fires. Webhook wins if it arrives first.
-_CLINIC_CALL_TIMER_FALLBACK_SECONDS = 30.0
+_CLINIC_CALL_COMPLETION_TIMEOUT_SECONDS = 310.0  # 5 min + small buffer; matches poller max
 
 
 # each source has its own scripted journey
@@ -63,7 +59,6 @@ SOURCE_SCRIPTS: dict[str, list[tuple[str, str | None, str, float]]] = {
     ],
 }
 
-# which source triggers the live ElevenLabs outbound call in the demo
 _DEMO_SOURCE = "odhf"
 _PATIENT_CALLBACK_RETRIES = 3
 _PATIENT_CALLBACK_RETRY_DELAY_SECONDS = 5.0
@@ -133,25 +128,26 @@ async def _simulate_source(
             if status == "calling" and source == _DEMO_SOURCE:
                 phone = settings.demo_phone_number
                 if phone and clinic_name:
+                    # Read the patient's intake details so the voice agent
+                    # can introduce the patient by name, give the phone, postal
+                    # code, and check language compatibility.
+                    patient_details = await _load_patient_details(search_id)
                     await prepare_clinic_call(search_id, source, clinic_name)
                     asyncio.create_task(
                         _place_call_safe(
                             phone_number=phone,
                             clinic_name=clinic_name,
-                            insurance_type="ifhp",
+                            insurance_type=patient_details.get("insurance_type") or "ifhp",
                             search_id=search_id,
                             source=source,
                             track_clinic_completion=True,
+                            extra_dynamic_variables={
+                                "patient_name": patient_details.get("name", ""),
+                                "patient_phone": patient_details.get("phone", ""),
+                                "patient_postal_code": patient_details.get("postal_code", ""),
+                                "patient_language": patient_details.get("language", ""),
+                            },
                         )
-                    )
-                    # Timer fallback: if the ElevenLabs post-call webhook
-                    # never arrives (e.g. tunnel down, webhook misconfigured),
-                    # this fires after _CLINIC_CALL_TIMER_FALLBACK_SECONDS and
-                    # unblocks the confirmed step so the patient callback
-                    # still fires. The webhook wins if it arrives first
-                    # because mark_clinic_call_finished is now idempotent.
-                    asyncio.create_task(
-                        _clinic_call_timer_fallback(search_id, source)
                     )
 
             # Only ODHF confirmed triggers the patient callback.
@@ -163,12 +159,31 @@ async def _simulate_source(
                         should_call_patient = True
 
                 if should_call_patient:
+                    # Post-call webhook already fired — clinic leg is over; dial the patient
+                    # using the phone they submitted on the form (Search.phone).
                     await _patient_callback(
                         search_id,
                         confirmed_clinic=clinic_name or source,
                         source=source,
                         waitlist_message=message,
                     )
+
+
+async def _load_patient_details(search_id: UUID) -> dict[str, str]:
+    """Pull the patient's intake form values out of the searches row so the
+    voice agent can quote them on the clinic call (name, phone, postal code,
+    language, insurance)."""
+    async with SessionLocal() as session:
+        search = await session.get(Search, search_id)
+        if search is None:
+            return {}
+        return {
+            "name": search.user_name or "",
+            "phone": search.phone or "",
+            "postal_code": search.postal_code or "",
+            "language": search.language or "",
+            "insurance_type": search.insurance_type or "",
+        }
 
 
 async def _place_call_safe(
@@ -178,6 +193,7 @@ async def _place_call_safe(
     search_id: UUID,
     source: str,
     track_clinic_completion: bool = False,
+    extra_dynamic_variables: dict[str, str] | None = None,
 ) -> None:
     try:
         from app.agents.voice_caller import place_outbound_call
@@ -188,10 +204,18 @@ async def _place_call_safe(
             insurance_type=insurance_type,
             search_id=search_id,
             source=source,
+            extra_dynamic_variables=extra_dynamic_variables,
         )
         logger.info("ElevenLabs clinic call queued — conversation_id=%s", conversation_id)
         if track_clinic_completion:
             await attach_clinic_conversation_id(search_id, source, conversation_id)
+            # Poll ElevenLabs for the conversation status. When it flips to
+            # "done" / "completed", we mark_clinic_call_finished, which
+            # unblocks the confirmed step and triggers the patient callback.
+            # This is the webhook-free way to know the clinic call ended.
+            asyncio.create_task(
+                _poll_clinic_call_until_done(search_id, source, conversation_id)
+            )
     except Exception as exc:
         logger.warning("ElevenLabs outbound call failed (non-fatal): %s", exc)
         if track_clinic_completion:
@@ -202,22 +226,31 @@ async def _place_call_safe(
             )
 
 
-async def _clinic_call_timer_fallback(search_id: UUID, source: str) -> None:
-    """Demo-grade safety net: if ElevenLabs' post-call webhook never lands
-    (e.g. tunnel down or webhook misconfigured), unblock the confirmed step
-    after a fixed delay so the patient callback still fires."""
-    await asyncio.sleep(_CLINIC_CALL_TIMER_FALLBACK_SECONDS)
+async def _poll_clinic_call_until_done(
+    search_id: UUID, source: str, conversation_id: str
+) -> None:
+    """Background poller — replaces the post-call webhook for demo reliability.
+
+    Hits ElevenLabs' GET /v1/convai/conversations/{id} every few seconds until
+    the conversation status flips to done or failed, then marks the clinic
+    call finished. The webhook handler still runs (for free) and `mark_clinic_call_finished`
+    is idempotent — whichever signal arrives first wins.
+    """
+    from app.agents.voice_caller import poll_conversation_until_done
+
+    outcome = await poll_conversation_until_done(conversation_id)
     fired = await mark_clinic_call_finished(
         search_id=search_id,
         source=source,
-        outcome="completed",
+        outcome=outcome,
     )
     if fired:
         logger.info(
-            "Timer fallback marked clinic call complete for %s/%s after %.0fs",
+            "Polling marked clinic call %s for %s/%s — outcome=%s",
+            conversation_id,
             search_id,
             source,
-            _CLINIC_CALL_TIMER_FALLBACK_SECONDS,
+            outcome,
         )
 
 
@@ -242,6 +275,7 @@ async def _patient_callback(
         if search is None:
             return
         patient_phone = search.phone
+        patient_name = search.user_name or ""
         language = search.language
         insurance_type = search.insurance_type
 
@@ -265,6 +299,7 @@ async def _patient_callback(
                 source=source,
                 extra_dynamic_variables={
                     "call_type": "patient_callback",
+                    "patient_name": patient_name,
                     "patient_language": language,
                     "result_message": waitlist_message,
                 },

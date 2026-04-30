@@ -19,6 +19,8 @@ outbound call internally — we never touch Twilio directly here).
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from uuid import UUID
 
@@ -27,11 +29,18 @@ import httpx
 from app.config import settings
 
 
+logger = logging.getLogger(__name__)
+
+
 # ElevenLabs Conversational AI outbound-call endpoint for Twilio-backed agents.
 # Body shape per ElevenLabs docs:
 #   https://elevenlabs.io/docs/conversational-ai/api-reference/twilio/outbound-call
 _ELEVENLABS_OUTBOUND_URL = (
     "https://api.elevenlabs.io/v1/convai/twilio/outbound-call"
+)
+
+_ELEVENLABS_CONVERSATION_URL = (
+    "https://api.elevenlabs.io/v1/convai/conversations/{conversation_id}"
 )
 
 # How long to wait for ElevenLabs to acknowledge the call request before
@@ -153,3 +162,89 @@ async def place_outbound_call(
         )
 
     return conversation_id
+
+
+# How often to poll ElevenLabs for conversation status, and the max wall-clock
+# we'll keep polling before giving up. The clinic call typically lasts 15–60s,
+# so 5 minutes is a generous ceiling.
+_POLL_INTERVAL_SECONDS = 3.0
+_POLL_MAX_SECONDS = 300.0
+
+
+async def poll_conversation_until_done(
+    conversation_id: str,
+    interval: float = _POLL_INTERVAL_SECONDS,
+    max_seconds: float = _POLL_MAX_SECONDS,
+) -> str:
+    """Poll the ElevenLabs conversation API until the call is no longer in
+    progress. Returns one of: "completed", "failed", "timeout".
+
+    ElevenLabs sets `status` on a conversation to one of:
+      - "initiated" / "in-progress" / "processing"  → still going
+      - "done"                                       → completed normally
+      - "failed"                                     → call failed
+    Anything else we treat as still-running and keep polling.
+
+    This is the polling counterpart to the post-call webhook — it lets us
+    detect call completion without depending on a public tunnel.
+    """
+    if not settings.elevenlabs_api_key:
+        return "failed"
+
+    url = _ELEVENLABS_CONVERSATION_URL.format(conversation_id=conversation_id)
+    headers = {"xi-api-key": settings.elevenlabs_api_key}
+
+    elapsed = 0.0
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        # Give ElevenLabs a beat to register the conversation before the first poll.
+        await asyncio.sleep(interval)
+        while elapsed < max_seconds:
+            try:
+                response = await client.get(url, headers=headers)
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "poll_conversation_until_done: transport error for %s — %s",
+                    conversation_id,
+                    exc,
+                )
+                await asyncio.sleep(interval)
+                elapsed += interval
+                continue
+
+            if response.status_code == 404:
+                # Conversation not yet visible — keep polling.
+                await asyncio.sleep(interval)
+                elapsed += interval
+                continue
+
+            if response.status_code >= 400:
+                logger.warning(
+                    "poll_conversation_until_done: %s returned %s — %s",
+                    conversation_id,
+                    response.status_code,
+                    response.text[:200],
+                )
+                await asyncio.sleep(interval)
+                elapsed += interval
+                continue
+
+            data = response.json()
+            raw_status = str(data.get("status", "")).lower()
+            call_successful = data.get("call_successful")
+            logger.info(
+                "poll_conversation_until_done: %s — status=%s call_successful=%s",
+                conversation_id,
+                raw_status,
+                call_successful,
+            )
+
+            if raw_status in {"done", "completed", "finished", "ended"}:
+                return "completed"
+            if raw_status in {"failed", "error"}:
+                return "failed"
+            # Anything else (e.g. "processing", "in-progress", "initiated"): keep polling.
+
+            await asyncio.sleep(interval)
+            elapsed += interval
+
+    return "timeout"
