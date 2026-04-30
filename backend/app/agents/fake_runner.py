@@ -125,9 +125,9 @@ async def _simulate_source(
                         )
                     )
 
-            # As soon as any clinic confirms the waitlist, call the user back.
-            # We only do this once per search, even if multiple sources confirm.
-            if status == "confirmed":
+            # The demo callback belongs to the same clinic call the audience hears.
+            # Other sources can confirm visually, but only ODHF/Heart Lake calls the user back.
+            if status == "confirmed" and source == _DEMO_SOURCE:
                 async with patient_callback_lock:
                     if not patient_callback_triggered.is_set():
                         patient_callback_triggered.set()
@@ -214,7 +214,7 @@ async def _patient_callback(
         logger.warning("Patient callback failed (non-fatal): %s", exc)
 
 
-# entry point — runs all 5 sources in parallel, then fires patient callback
+# entry point — runs all 5 sources in parallel; ODHF confirmation triggers callback
 async def run_fake_search(search_id: UUID) -> None:
     patient_callback_triggered = asyncio.Event()
     patient_callback_lock = asyncio.Lock()
