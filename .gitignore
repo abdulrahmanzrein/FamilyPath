@@ -1,5 +1,6 @@
 # Local-only Claude context (per-machine, not shared)
 CLAUDE.md
+.claude/
 
 # ---------- Secrets / env ----------
 .env
