@@ -10,6 +10,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import providers as providers_api
+from app.api import searches as searches_api
+from app.api import voice as voice_api
 from app.config import settings
 from app.db import models  # noqa: F401  -- importing registers the tables on Base.metadata
 from app.db.base import Base
@@ -38,6 +41,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# mount the API + WS routers. searches_api exposes both an HTTP router (with
+# /api/searches prefix) and a separate ws_router (no prefix) for /ws/searches/{id}
+# — the WS path is intentionally outside /api per PRD §API.
+app.include_router(searches_api.router)
+app.include_router(searches_api.ws_router)
+app.include_router(voice_api.router)
+app.include_router(providers_api.router)
 
 
 @app.get("/")

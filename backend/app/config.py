@@ -25,9 +25,11 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
-    browserbase_api_key: str = ""
-    browserbase_project_id: str = ""
     nexos_api_key: str = ""
+    bypass_nexos: bool = False
+
+    demo_phone_number: str = ""          # team's phone — the "clinic" ElevenLabs dials
+    elevenlabs_phone_number_id: str = "" # ElevenLabs outbound phone number ID
 
     # vite dev server runs here — needed for CORS later
     cors_origins: list[str] = ["http://localhost:5173"]
