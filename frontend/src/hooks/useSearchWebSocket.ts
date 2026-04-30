@@ -44,7 +44,7 @@ export function useSearchWebSocket(searchId: string | null) {
           return next
         })
       } catch {
-        // malformed event — ignore
+        // malformed event, ignore
       }
     }
 

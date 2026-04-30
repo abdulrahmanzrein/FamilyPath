@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.api import navigator as navigator_api
 from app.api import providers as providers_api
 from app.api import searches as searches_api
 from app.api import voice as voice_api
@@ -54,6 +55,7 @@ app.include_router(searches_api.router)
 app.include_router(searches_api.ws_router)
 app.include_router(voice_api.router)
 app.include_router(providers_api.router)
+app.include_router(navigator_api.router)
 
 
 @app.get("/")

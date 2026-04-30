@@ -1,7 +1,7 @@
 # nexos.ai PII gateway — wraps every Claude call so user_name + free-text user fields
 # never reach Anthropic raw. Per prd.md §Key Constraints this MUST exist before any
 # Claude call site lands. All transcript parsing, yes/no extraction, and any future
-# LLM features in this app go through `complete()` below.
+# LLM features in this app go through `complete()` / `complete_chat()` below.
 #
 # Two paths:
 #   1) Default — POST to nexos.ai's gateway endpoint. Gateway scrubs PII, then forwards
@@ -68,6 +68,40 @@ def _scrub_pii(payload: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def _first_text_block(data: dict[str, Any]) -> str:
+    blocks = data.get("content", [])
+    for block in blocks:
+        if block.get("type") == "text":
+            return block.get("text", "")
+    return ""
+
+
+async def _post_messages(body: dict[str, Any]) -> str:
+    """Shared HTTP call for Anthropic Messages API (nexos or direct)."""
+    if settings.bypass_nexos:
+        logger.warning("BYPASS_NEXOS=true — calling Anthropic directly, skipping nexos.ai")
+        url = f"{ANTHROPIC_BASE_URL}/messages"
+        headers = {
+            "x-api-key": settings.anthropic_api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+    else:
+        url = f"{NEXOS_BASE_URL}/messages"
+        headers = {
+            "Authorization": f"Bearer {settings.nexos_api_key}",
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(url, json=body, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+
+    return _first_text_block(data)
+
+
 async def complete(
     *,
     system: str,
@@ -76,21 +110,7 @@ async def complete(
     max_tokens: int = 1024,
     temperature: float = 0.0,
 ) -> str:
-    """Single Claude entrypoint for the whole backend.
-
-    Args:
-        system: System prompt — not interpolated with user PII.
-        user_prompt: The actual user-turn message. Should be pre-templated by the
-            caller using ONLY non-PII fields (clinic_name, transcript text, etc.).
-        pii_context: Optional structured map of fields the caller *would* like Claude
-            to see — passed through `_scrub_pii` first. Anything in `_PII_KEYS` is
-            dropped. Survivors are appended to the user message as a JSON-ish tail.
-        max_tokens: Claude max_tokens. Default 1024 — yes/no extraction is tiny.
-        temperature: Defaults to 0 for deterministic extraction.
-
-    Returns:
-        The plain text of Claude's first content block. Caller does its own parsing.
-    """
+    """Single-turn Claude entrypoint for the whole backend."""
     safe_context = _scrub_pii(pii_context or {})
     if safe_context:
         user_prompt = f"{user_prompt}\n\nContext: {safe_context}"
@@ -102,34 +122,59 @@ async def complete(
         "system": system,
         "messages": [{"role": "user", "content": user_prompt}],
     }
+    return await _post_messages(body)
 
-    if settings.bypass_nexos:
-        # Emergency path — direct Anthropic. PII still scrubbed locally above.
-        logger.warning("BYPASS_NEXOS=true — calling Anthropic directly, skipping nexos.ai")
-        url = f"{ANTHROPIC_BASE_URL}/messages"
-        headers = {
-            "x-api-key": settings.anthropic_api_key,
-            "anthropic-version": ANTHROPIC_VERSION,
-            "content-type": "application/json",
-        }
-    else:
-        # Default path — nexos.ai gateway. They forward to Anthropic on our behalf
-        # and apply their own PII filters on top of our local scrub.
-        url = f"{NEXOS_BASE_URL}/messages"
-        headers = {
-            "Authorization": f"Bearer {settings.nexos_api_key}",
-            "anthropic-version": ANTHROPIC_VERSION,
-            "content-type": "application/json",
-        }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(url, json=body, headers=headers)
+async def complete_chat(
+    *,
+    system: str,
+    messages: list[dict[str, str]],
+    max_tokens: int = 2048,
+    temperature: float = 0.2,
+) -> str:
+    """Multi-turn Claude: `messages` are Anthropic-shaped {"role":"user"|"assistant","content": str}."""
+    body = {
+        "model": CLAUDE_MODEL,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system,
+        "messages": messages,
+    }
+    return await _post_messages(body)
+
+
+OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+
+
+async def complete_chat_openai(
+    *,
+    system: str,
+    messages: list[dict[str, str]],
+    model: str,
+    max_tokens: int = 2048,
+    temperature: float = 0.2,
+) -> str:
+    """Multi-turn OpenAI Chat Completions. `messages` are user/assistant turns only."""
+    if not settings.openai_api_key or not settings.openai_api_key.strip():
+        raise ValueError("openai_api_key is not set")
+
+    api_messages: list[dict[str, str]] = [{"role": "system", "content": system}, *messages]
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": api_messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key.strip()}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(OPENAI_CHAT_COMPLETIONS_URL, json=body, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-
-    # Anthropic Messages API shape: { content: [{ type: "text", text: "..." }, ...] }
-    blocks = data.get("content", [])
-    for block in blocks:
-        if block.get("type") == "text":
-            return block.get("text", "")
-    return ""
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    msg = choices[0].get("message") or {}
+    return (msg.get("content") or "").strip()

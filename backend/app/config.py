@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     nexos_api_key: str = ""
     bypass_nexos: bool = False
 
+    # Optional — /api/navigator/chat uses OpenAI when this is set (takes priority over Claude).
+    openai_api_key: str = ""
+    openai_navigator_model: str = "gpt-4o-mini"
+
     demo_phone_number: str = ""          # team's phone — the "clinic" ElevenLabs dials
     elevenlabs_phone_number_id: str = "" # ElevenLabs outbound phone number ID
     elevenlabs_patient_phone_number_id: str = ""

@@ -2,15 +2,15 @@ import { useState } from 'react'
 import { Map, MapMarker, MarkerContent, MarkerPopup, MapControls } from '@/components/ui/map'
 import { Button } from '@/components/ui/button'
 import { AgentGrid } from '@/components/AgentGrid'
+import { HealthcareNavigatorChat } from '@/components/HealthcareNavigatorChat'
 import type { AgentSource, AgentStatus } from '@/hooks/useSearchWebSocket'
 import { useSearchWebSocket } from '@/hooks/useSearchWebSocket'
 import { startSearch } from '@/api/client'
-import { Heart, MapPin, Search, PhoneCall, ClipboardList, ShieldCheck, Stethoscope, ArrowRight, CheckCircle2, Phone, Globe2, Lock, Sparkles, Loader2, Mic } from 'lucide-react'
-import { useVoiceConversation } from '@/voice/elevenlabs'
+import { Heart, MapPin, Search, PhoneCall, ClipboardList, ShieldCheck, Stethoscope, ArrowRight, CheckCircle2, Phone, Globe2, Lock, Sparkles, Loader2 } from 'lucide-react'
 
 type Page = 'home' | 'find'
 
-// Demo clinic pins for the map — Brampton / Scarborough per PRD data sources
+// Demo clinic pins for the map (Brampton / Scarborough per PRD data sources)
 const DEMO_CLINICS = [
   { id: '1', source: 'odhf', name: 'Heart Lake Health Centre',        address: '55 Quarry Edge Dr, Brampton',  lng: -79.8021, lat: 43.7530 },
   { id: '2', source: 'cpso', name: 'Bramalea Community Clinic',        address: '150 Central Park Dr, Brampton', lng: -79.7050, lat: 43.7100 },
@@ -30,8 +30,6 @@ function App() {
   const [error, setError] = useState<string | null>(null)
 
   const { agents, connected } = useSearchWebSocket(searchId)
-  const voice = useVoiceConversation()
-  const hasVoiceAgent = Boolean(import.meta.env.VITE_ELEVENLABS_AGENT_ID)
 
   // Build a map keyed by source for the AgentGrid
   const agentMap = agents.reduce<Partial<Record<AgentSource, AgentStatus>>>((acc, a) => {
@@ -54,7 +52,7 @@ function App() {
       })
       setSearchId(res.search_id)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed — is the backend running?')
+      setError(e instanceof Error ? e.message : 'Search failed. Is the backend running?')
     } finally {
       setSearching(false)
     }
@@ -83,10 +81,6 @@ function App() {
         <nav className="flex items-center gap-1">
           <Button variant="ghost" onClick={() => setPage('home')} className={`h-auto text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 ${page === 'home' ? 'text-blue-700 bg-blue-50 hover:bg-blue-50 hover:text-blue-700' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Home</Button>
           <Button variant="ghost" onClick={() => setPage('find')} className={`h-auto text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 ${page === 'find' ? 'text-blue-700 bg-blue-50 hover:bg-blue-50 hover:text-blue-700' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Find a Doctor</Button>
-          <Button onClick={() => setPage('find')} className="ml-3 hidden md:inline-flex items-center gap-1.5 h-auto text-sm font-semibold bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-800 active:bg-black transition-all duration-200 shadow-sm">
-            Get started
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Button>
         </nav>
       </header>
 
@@ -109,7 +103,7 @@ function App() {
                 <span className="block bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">who speaks your language.</span>
               </h1>
               <p className="text-slate-600 text-base md:text-lg max-w-2xl leading-relaxed">
-                We connect newcomers with family doctors across Ontario who are accepting new patients — for free, in your preferred language.
+                We connect newcomers with family doctors across Ontario who are accepting new patients. It is free, in your preferred language.
               </p>
               <div className="flex flex-col sm:flex-row items-center gap-3 mt-2">
                 <Button onClick={() => setPage('find')} className="group bg-blue-700 text-white px-6 py-3.5 h-auto rounded-xl text-sm font-semibold hover:bg-blue-800 active:bg-blue-900 transition-all duration-200 shadow-lg shadow-blue-700/20 hover:shadow-blue-700/40 hover:-translate-y-0.5 inline-flex items-center gap-2">
@@ -135,7 +129,7 @@ function App() {
               {[
                 { stat: '10+', label: 'Verified clinics' },
                 { stat: '4', label: 'Languages supported' },
-                { stat: '< 5 min', label: 'Average search time' },
+                { stat: 'under 5 min', label: 'Average search time' },
                 { stat: '100%', label: 'Free for patients' },
               ].map(s => (
                 <div key={s.label} className="text-center md:text-left">
@@ -150,7 +144,7 @@ function App() {
             <div className="text-center mb-14 md:mb-16 max-w-2xl mx-auto">
               <p className="text-xs font-semibold text-blue-700 uppercase tracking-[0.15em] mb-3">How it works</p>
               <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-900">Four steps to your new family doctor</h2>
-              <p className="text-slate-600 text-base mt-4 leading-relaxed">From intake to confirmed appointment — we handle the calls, paperwork, and follow-ups so you don't have to.</p>
+              <p className="text-slate-600 text-base mt-4 leading-relaxed">From intake to confirmed appointment we handle the calls, paperwork, and follow ups so you do not have to.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
               {[
@@ -180,14 +174,14 @@ function App() {
                 <div>
                   <p className="text-xs font-semibold text-blue-700 uppercase tracking-[0.15em] mb-3">Why MedBridge</p>
                   <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-900 leading-tight">Built for newcomers, trusted by Ontarians.</h2>
-                  <p className="text-slate-600 text-base mt-4 leading-relaxed">Finding a family doctor in Ontario is hard. We make it simple, multilingual, and fully free — no OHIP card required to get started.</p>
+                  <p className="text-slate-600 text-base mt-4 leading-relaxed">Finding a family doctor in Ontario is hard. We make it simple, multilingual, and fully free. No OHIP card required to get started.</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
                     { icon: ShieldCheck, title: 'Privacy first', desc: 'Your information is never shared without consent.', color: 'blue' },
                     { icon: Stethoscope, title: 'Verified clinics', desc: 'Sourced directly from official Ontario registries.', color: 'emerald' },
                     { icon: Globe2, title: 'Multilingual', desc: 'Punjabi, Arabic, Tagalog, Spanish, and more.', color: 'amber' },
-                    { icon: Lock, title: 'Secure by design', desc: 'Bank-level encryption protects your data.', color: 'violet' },
+                    { icon: Lock, title: 'Secure by design', desc: 'Bank level encryption protects your data.', color: 'violet' },
                   ].map((f, i) => {
                     const Icon = f.icon
                     const colors: Record<string, string> = {
@@ -260,7 +254,7 @@ function App() {
                 <label className="text-xs font-semibold text-slate-700">Phone number</label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  <input className="w-full border border-slate-200 rounded-lg pl-9 pr-3.5 py-3 text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all duration-200" placeholder="+1 (416) 555-0100" value={phone} onChange={e => setPhone(e.target.value)} />
+                  <input className="w-full border border-slate-200 rounded-lg pl-9 pr-3.5 py-3 text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all duration-200" placeholder="+1 (416) 555 0100" value={phone} onChange={e => setPhone(e.target.value)} />
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -310,60 +304,7 @@ function App() {
                 Your information stays private and encrypted.
               </p>
 
-              <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-4 flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="shrink-0 w-8 h-8 rounded-lg bg-violet-100 border border-violet-200 flex items-center justify-center">
-                      <Mic className="w-4 h-4 text-violet-800" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-900">Voice navigator</p>
-                      <p className="text-[11px] text-slate-600 truncate">Speak with the assistant — mic access required</p>
-                    </div>
-                  </div>
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-violet-800 bg-violet-100 px-2 py-0.5 rounded-full capitalize">{voice.status}</span>
-                </div>
-                {!hasVoiceAgent ? (
-                  <p className="text-[11px] text-slate-600 leading-relaxed">Add <span className="font-mono text-[10px]">VITE_ELEVENLABS_AGENT_ID</span> to <span className="font-mono text-[10px]">frontend/.env</span>, restart Vite.</p>
-                ) : (
-                  <>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="flex-1 border-violet-300 bg-white hover:bg-violet-50 text-violet-900"
-                        onClick={() => void voice.start()}
-                        disabled={voice.status === 'connecting' || voice.status === 'listening' || voice.status === 'speaking'}
-                      >
-                        <Mic className="w-3.5 h-3.5" />
-                        Start talking
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-slate-700"
-                        onClick={() => void voice.stop()}
-                        disabled={voice.status === 'idle'}
-                      >
-                        Stop
-                      </Button>
-                    </div>
-                    <div className="max-h-28 overflow-y-auto text-[11px] space-y-2 bg-white rounded-lg border border-violet-100 p-2.5 leading-snug">
-                      {voice.messages.length === 0 ? (
-                        <p className="text-slate-400">Conversation transcript appears here.</p>
-                      ) : (
-                        voice.messages.map((m, i) => (
-                          <p key={i} className={m.role === 'user' ? 'text-slate-800' : 'text-violet-900'}>
-                            <span className="font-semibold">{m.role === 'user' ? 'You' : 'Assistant'}:</span> {m.text}
-                          </p>
-                        ))
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
+              <HealthcareNavigatorChat preferredLanguage={language} insuranceType={insurance} />
             </div>
 
             {searched && (
@@ -453,7 +394,7 @@ function App() {
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="bg-amber-400 w-3 h-3 rounded-full border-2 border-white shadow ring-1 ring-slate-200 shrink-0" />
-                    <span className="text-xs text-slate-700 font-medium">Waitlist open / calling</span>
+                    <span className="text-xs text-slate-700 font-medium">Waitlist open or calling</span>
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-100">
