@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     elevenlabs_api_key: str = ""
     elevenlabs_agent_id: str = ""
+    elevenlabs_patient_agent_id: str = ""
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
 
     demo_phone_number: str = ""          # team's phone — the "clinic" ElevenLabs dials
     elevenlabs_phone_number_id: str = "" # ElevenLabs outbound phone number ID
+    elevenlabs_patient_phone_number_id: str = ""
 
     # vite dev server runs here — needed for CORS later
     cors_origins: list[str] = ["http://localhost:5173"]

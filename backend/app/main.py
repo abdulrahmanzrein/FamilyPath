@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api import providers as providers_api
 from app.api import searches as searches_api
@@ -26,6 +27,9 @@ async def lifespan(app: FastAPI):
     # `run_sync` block — `create_all` itself is sync DDL.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all does not alter existing tables. This keeps older demo
+        # volumes working after we added patient callback phone support.
+        await conn.execute(text("ALTER TABLE searches ADD COLUMN IF NOT EXISTS phone VARCHAR"))
     yield
     # nothing to tear down on shutdown — asyncpg pool closes itself when the process exits
 
