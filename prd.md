@@ -29,12 +29,9 @@ User enters: postal code, preferred language, insurance type (OHIP / IFHP / UHIP
 | 3 | MCI card flips red early | *"No MCI clinics within radius"* — one honest failure makes the rest credible |
 | 4 | Voice call placed live | ElevenLabs dials the clinic number. Judges hear English call. Transcript streams. |
 | 5 | Card confirms green | *"Yes, we accept IFHP."* Card flips confirmed. |
-| 6 | **Voice interrupt** | Say: *"Skip CPSO, prioritize Appletree"* — CPSO card greys out, Appletree visibly accelerates |
-| 7 | Result delivered | App speaks confirmed result back to user in Punjabi |
-| 8 | Sponsor slide | Call out all 8 integrations |
-| 9 | Close | *"A refugee used to spend weeks on this. We did it in 90 seconds. Free. Open source."* |
-
-**Why "skip CPSO":** The CPSO worker is scripted to be the slowest — it will still be in `searching` state when the voice interrupt fires ~10–12 seconds in, so the cancel is visually meaningful. Skipping a worker that's already finished would be a no-op on stage.
+| 6 | Result delivered | App speaks confirmed result back to user in Punjabi |
+| 7 | Sponsor slide | Call out all 8 integrations |
+| 8 | Close | *"A refugee used to spend weeks on this. We did it in 90 seconds. Free. Open source."* |
 
 ---
 
@@ -79,7 +76,7 @@ PostgreSQL (providers · searches · search_results)
 |---|---|
 | Backend | Python 3.12, FastAPI, async SQLAlchemy 2.0, asyncpg |
 | HTTP client (sponsor APIs) | httpx |
-| Agent orchestration | LangGraph (supervisor + worker pattern, with `interrupt`-able state) |
+| Agent orchestration | LangGraph (supervisor + worker pattern) |
 | Call transcript parsing | Claude Sonnet 4.6 (via nexos.ai) |
 | Voice in/out | ElevenLabs Conversational AI (Flash v2.5) |
 | Outbound calling | ElevenLabs Twilio integration (ElevenLabs initiates the call) |
@@ -121,10 +118,6 @@ All 5 LangGraph worker agents are assigned providers from this seeded data. No l
 - Receives `report_status` tool calls from workers
 - For each event: writes/updates the matching `search_results` row, then `hub.broadcast(search_id, event)` pushes to all dashboards subscribed to that search
 - Calls the voice agent **in-process** (asyncio task) when a worker reports `found` and the clinic is unverified
-- Mutates state on `/api/voice/interrupt`:
-  - `action=skip` — cancels that worker's pending tool calls
-  - `action=prioritize` — boosts that worker's poll/scroll budget so it finishes sooner
-  - `action=cancel` — aborts the whole search
 
 ### Worker agents (×5, parallel)
 
@@ -158,7 +151,6 @@ Each worker is assigned one seeded provider and walks it through a scripted stat
 | `POST` | `/api/searches/start` | Body: `{ name, postal_code, language, insurance_type }`. Returns `{ search_id }`. |
 | `GET` | `/api/searches/{id}/status` | Returns `{ search_id, overall_status, agents: AgentStatus[] }`. Polling fallback for the WS. |
 | `WS` | `/ws/searches/{id}` | Live event stream — envelope below. |
-| `POST` | `/api/voice/interrupt` | ElevenLabs tool-call target. Body: `{ action, source? }`. `source` is required for `skip`/`prioritize`, optional for `cancel`. |
 | `GET` | `/api/searches/{id}/results` | Final output: `{ confirmed: AgentStatus[], calling: AgentStatus[], failed: AgentStatus[] }` |
 | `GET` | `/api/providers` | Provider lookup by postal code + language + insurance type |
 
@@ -245,17 +237,16 @@ Items marked `[x]` are already in the repo on `backend/agents` branch.
 **Core infrastructure**
 - [x] Postgres schema + async SQLAlchemy models (`db/models.py`)
 - [x] Async session + `get_session` FastAPI dependency
-- [x] Pydantic schemas for all routes (`schemas/searches.py`, `schemas/providers.py`, `schemas/voice.py`)
+- [x] Pydantic schemas for searches and providers (`schemas/searches.py`, `schemas/providers.py`)
 - [x] WebSocket hub (`ws/hub.py`)
 - [x] `fake_runner` — scripted 5-worker demo runner (this IS the product flow, not a fallback)
 - [x] FastAPI app entry (`app/main.py`) — lifespan hook, CORS, healthcheck
-- [ ] Routes: `api/searches.py`, `api/providers.py`, `api/voice.py`
+- [x] Routes: `api/searches.py`, `api/providers.py`
 - [ ] ODHF seed loader — hardcoded ~10 Brampton/Scarborough clinics with real names/addresses/lat/lng; one clinic uses `DEMO_PHONE_NUMBER`
 - [ ] nexos.ai PII gateway wrapping every Claude call. Build this *before* the first Claude call lands.
 
 **Agent orchestration**
-- [ ] LangGraph supervisor with 5 scripted-demo worker subgraphs and interrupt-able state via the LangGraph checkpointer
-- [ ] `/api/voice/interrupt` endpoint — mutates running supervisor graph state mid-run (the demo wow-moment)
+- [ ] LangGraph supervisor with 5 scripted-demo worker subgraphs
 
 **Sponsor integrations (P1)**
 - [ ] **Claude / Anthropic** — call transcript parsing + yes/no extraction via nexos.ai
@@ -271,7 +262,6 @@ Items marked `[x]` are already in the repo on `backend/agents` branch.
 - [ ] Twilio phone number purchased and linked to ElevenLabs agent
 - [ ] Outbound call flow: ElevenLabs dials clinic → asks acceptance question in English → extracts yes/no → updates dashboard
 - [ ] Result delivered back to user in their chosen language (Punjabi / Arabic / Tagalog / Spanish)
-- [ ] Voice interrupt: user speaks mid-run → ElevenLabs tool call hits `/api/voice/interrupt` → agents reprioritize
 
 **Frontend stack setup (first 90 minutes — do this before any feature code)**
 
@@ -351,7 +341,7 @@ Async driver prefix `postgresql+asyncpg://` is required — SQLAlchemy uses it t
 - **ElevenLabs Flash v2.5 does not support Somali real-time** — Arabic/English fallback only. Never claim Somali support in code or UI copy.
 - **nexos.ai must wrap every Claude call** — `user_name` and any free-text user fields are stripped before the request leaves the gateway. Postal code is FSA-level (e.g. `M5V`) and is allowed through. Build the wrapper before the first Claude call lands.
 - **WebSocket event envelope is frozen:** `{ source, status, clinic_name, message, updated_at }`. Same shape across supervisor, `fake_runner`, and the dashboard. Do not invent a different envelope.
-- **One demo path that works > a configurable system that mostly works.** This is 36 hours, not a production codebase.
+- **Mid-search voice interrupts** (skip / reprioritize / cancel agents by spoken command) are **not** in scope — supervisors and `fake_runner` run each search straight through once started.
 
 ---
 

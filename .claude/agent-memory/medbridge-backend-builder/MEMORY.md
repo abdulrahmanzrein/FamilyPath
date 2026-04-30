@@ -1,0 +1,3 @@
+- [LLM gateway contract](project_llm_gateway_contract.md) — single `complete()` entrypoint in `app/agents/llm_gateway.py`; no direct anthropic SDK calls anywhere else
+- [Build order — what's done and what's next](project_block_order.md) — tracks Person 1 block sequence so each turn picks up the right next piece
+- [Scope changes overriding frontmatter](project_scope_changes.md) — voice interrupts OUT, all 5 workers scripted-demo (no scrapers, no Browserbase, no Computer Use)
