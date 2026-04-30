@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     # nothing to tear down on shutdown — asyncpg pool closes itself when the process exits
 
 
-app = FastAPI(title="MedBridge", lifespan=lifespan)
+app = FastAPI(title="MedBridge", lifespan=lifespan, redirect_slashes=False)
 
 # CORS = browser rule that JS on origin A can't call API on origin B unless B opts in.
 # Frontend will run on :5173 (Vite), API on :8000 — different ports = different origins.

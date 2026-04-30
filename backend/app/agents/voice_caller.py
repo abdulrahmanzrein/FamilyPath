@@ -69,6 +69,8 @@ async def place_outbound_call(
     search_id: UUID,
     source: str,
     extra_dynamic_variables: dict[str, str] | None = None,
+    agent_id_override: str | None = None,
+    phone_number_id_override: str | None = None,
 ) -> str:
     """Place an outbound call via ElevenLabs Conversational AI.
 
@@ -79,16 +81,18 @@ async def place_outbound_call(
     Returns the ElevenLabs conversation_id.
     """
     phone_number = _normalize_phone_number(phone_number)
+    agent_id = agent_id_override or settings.elevenlabs_agent_id
+    phone_number_id = phone_number_id_override or settings.elevenlabs_phone_number_id
 
     if not settings.elevenlabs_api_key:
         raise RuntimeError(
             "elevenlabs_api_key is not configured — cannot place outbound call"
         )
-    if not settings.elevenlabs_agent_id:
+    if not agent_id:
         raise RuntimeError(
             "elevenlabs_agent_id is not configured — cannot place outbound call"
         )
-    if not settings.elevenlabs_phone_number_id:
+    if not phone_number_id:
         raise RuntimeError(
             "elevenlabs_phone_number_id is not configured — "
             "cannot place outbound call"
@@ -108,8 +112,8 @@ async def place_outbound_call(
         dynamic_variables.update(extra_dynamic_variables)
 
     payload = {
-        "agent_id": settings.elevenlabs_agent_id,
-        "agent_phone_number_id": settings.elevenlabs_phone_number_id,
+        "agent_id": agent_id,
+        "agent_phone_number_id": phone_number_id,
         "to_number": phone_number,
         "conversation_initiation_client_data": {
             "dynamic_variables": dynamic_variables,

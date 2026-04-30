@@ -1,4 +1,4 @@
-# pretend version of the 5 worker agents — used until the real LangGraph supervisor is built
+# scripted demo version of the 5 worker agents
 # walks each source through pending -> searching -> found -> calling -> confirmed/failed
 # writes rows to search_results AND broadcasts events through the websocket hub
 # so the REST status endpoint and the live dashboard stay in sync
@@ -10,12 +10,24 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from app.agents.call_state import (
+    attach_clinic_conversation_id,
+    mark_clinic_call_finished,
+    prepare_clinic_call,
+    wait_for_clinic_call_finished,
+)
 from app.config import settings
 from app.db.models import Search, SearchResult
 from app.db.session import SessionLocal
 from app.ws.hub import hub
 
 logger = logging.getLogger(__name__)
+
+_CLINIC_CALL_COMPLETION_TIMEOUT_SECONDS = 90.0
+# Timer fallback: if the ElevenLabs post-call webhook hasn't arrived this many
+# seconds after we placed the clinic call, mark it complete anyway so the
+# patient callback still fires. Webhook wins if it arrives first.
+_CLINIC_CALL_TIMER_FALLBACK_SECONDS = 30.0
 
 
 # each source has its own scripted journey
@@ -26,28 +38,23 @@ SOURCE_SCRIPTS: dict[str, list[tuple[str, str | None, str, float]]] = {
         ("searching", None, "looking up clinics in postal area", 1.5),
         ("found", "Heart Lake Health Centre", "clinic is accepting waitlist requests", 1.5),
         ("calling", "Heart Lake Health Centre", "calling clinic to add user to waitlist", 2.0),
-        ("confirmed", "Heart Lake Health Centre", "user added to waitlist", 4.5),
+        # delay 0 — webhook gates the transition to confirmed
+        ("confirmed", "Heart Lake Health Centre", "user added to waitlist", 0.0),
     ],
     "cpso": [
         ("pending", None, "queued", 0.0),
         ("searching", None, "scanning CPSO register for Punjabi GPs", 1.5),
         ("found", "Bramalea Community Clinic", "clinic is accepting waitlist requests", 2.0),
-        ("calling", "Bramalea Community Clinic", "calling clinic to add user to waitlist", 2.0),
-        ("confirmed", "Bramalea Community Clinic", "user added to waitlist", 2.0),
     ],
     "appletree": [
         ("pending", None, "queued", 0.0),
         ("searching", None, "checking Appletree clinic pages", 1.0),
         ("found", "Sandalwood Medical Clinic", "clinic is accepting waitlist requests", 1.5),
-        ("calling", "Sandalwood Medical Clinic", "calling clinic to add user to waitlist", 2.0),
-        ("confirmed", "Sandalwood Medical Clinic", "user added to waitlist", 3.0),
     ],
     "ifhp": [
         ("pending", None, "queued", 0.0),
         ("searching", None, "querying Medavie IFHP directory", 2.0),
         ("found", "Scarborough Newcomer Health Centre", "clinic is accepting waitlist requests", 1.5),
-        ("calling", "Scarborough Newcomer Health Centre", "calling clinic to add user to waitlist", 2.0),
-        # stays in "calling" — call still ringing when search wraps up
     ],
     "mci": [
         ("pending", None, "queued", 0.0),
@@ -58,6 +65,8 @@ SOURCE_SCRIPTS: dict[str, list[tuple[str, str | None, str, float]]] = {
 
 # which source triggers the live ElevenLabs outbound call in the demo
 _DEMO_SOURCE = "odhf"
+_PATIENT_CALLBACK_RETRIES = 3
+_PATIENT_CALLBACK_RETRY_DELAY_SECONDS = 5.0
 
 
 async def _simulate_source(
@@ -72,6 +81,18 @@ async def _simulate_source(
         for status, clinic_name, message, delay in script:
             if delay:
                 await asyncio.sleep(delay)
+
+            # For ODHF confirmed: block until ElevenLabs post-call webhook fires.
+            # This ensures ODHF only turns green after the clinic conversation ends.
+            if status == "confirmed" and source == _DEMO_SOURCE:
+                call_outcome = await wait_for_clinic_call_finished(
+                    search_id,
+                    source,
+                    _CLINIC_CALL_COMPLETION_TIMEOUT_SECONDS,
+                )
+                if call_outcome != "completed":
+                    status = "failed"
+                    message = _clinic_call_failure_message(call_outcome)
 
             # find or create the search_results row for this (search_id, source)
             existing = await session.execute(
@@ -97,7 +118,6 @@ async def _simulate_source(
 
             await session.commit()
 
-            # AgentStatus shape from app/schemas/searches.py
             event = {
                 "source": source,
                 "status": status,
@@ -107,38 +127,48 @@ async def _simulate_source(
             }
             await hub.broadcast(search_id, event)
 
-            # When the demo source hits "calling", place the live ElevenLabs call.
-            # We fire-and-forget via asyncio.create_task so the scripted timeline
-            # continues (next step will arrive and flip the card to "confirmed"
-            # once the simulated delay elapses — the real ElevenLabs result updates
-            # the same row via the post-call webhook when it lands).
+            # When ODHF hits "calling", place the live ElevenLabs clinic call.
+            # prepare_clinic_call registers the asyncio.Event that the confirmed
+            # step blocks on. The call itself runs in the background.
             if status == "calling" and source == _DEMO_SOURCE:
                 phone = settings.demo_phone_number
                 if phone and clinic_name:
+                    await prepare_clinic_call(search_id, source, clinic_name)
                     asyncio.create_task(
                         _place_call_safe(
                             phone_number=phone,
                             clinic_name=clinic_name,
-                            insurance_type="ifhp",  # scripted demo always uses IFHP
+                            insurance_type="ifhp",
                             search_id=search_id,
                             source=source,
+                            track_clinic_completion=True,
                         )
                     )
+                    # Timer fallback: if the ElevenLabs post-call webhook
+                    # never arrives (e.g. tunnel down, webhook misconfigured),
+                    # this fires after _CLINIC_CALL_TIMER_FALLBACK_SECONDS and
+                    # unblocks the confirmed step so the patient callback
+                    # still fires. The webhook wins if it arrives first
+                    # because mark_clinic_call_finished is now idempotent.
+                    asyncio.create_task(
+                        _clinic_call_timer_fallback(search_id, source)
+                    )
 
-            # The demo callback belongs to the same clinic call the audience hears.
-            # Other sources can confirm visually, but only ODHF/Heart Lake calls the user back.
+            # Only ODHF confirmed triggers the patient callback.
             if status == "confirmed" and source == _DEMO_SOURCE:
+                should_call_patient = False
                 async with patient_callback_lock:
                     if not patient_callback_triggered.is_set():
                         patient_callback_triggered.set()
-                        asyncio.create_task(
-                            _patient_callback(
-                                search_id,
-                                confirmed_clinic=clinic_name or source,
-                                source=source,
-                                waitlist_message=message,
-                            )
-                        )
+                        should_call_patient = True
+
+                if should_call_patient:
+                    await _patient_callback(
+                        search_id,
+                        confirmed_clinic=clinic_name or source,
+                        source=source,
+                        waitlist_message=message,
+                    )
 
 
 async def _place_call_safe(
@@ -147,11 +177,10 @@ async def _place_call_safe(
     insurance_type: str,
     search_id: UUID,
     source: str,
+    track_clinic_completion: bool = False,
 ) -> None:
-    """Wrapper around voice_caller.place_outbound_call that logs and swallows
-    exceptions so a failed call doesn't crash the fake_runner task."""
     try:
-        from app.agents.voice_caller import place_outbound_call  # local import avoids circular deps
+        from app.agents.voice_caller import place_outbound_call
 
         conversation_id = await place_outbound_call(
             phone_number=phone_number,
@@ -160,9 +189,44 @@ async def _place_call_safe(
             search_id=search_id,
             source=source,
         )
-        logger.info("ElevenLabs call queued — conversation_id=%s", conversation_id)
+        logger.info("ElevenLabs clinic call queued — conversation_id=%s", conversation_id)
+        if track_clinic_completion:
+            await attach_clinic_conversation_id(search_id, source, conversation_id)
     except Exception as exc:
         logger.warning("ElevenLabs outbound call failed (non-fatal): %s", exc)
+        if track_clinic_completion:
+            await mark_clinic_call_finished(
+                search_id=search_id,
+                source=source,
+                outcome="failed",
+            )
+
+
+async def _clinic_call_timer_fallback(search_id: UUID, source: str) -> None:
+    """Demo-grade safety net: if ElevenLabs' post-call webhook never lands
+    (e.g. tunnel down or webhook misconfigured), unblock the confirmed step
+    after a fixed delay so the patient callback still fires."""
+    await asyncio.sleep(_CLINIC_CALL_TIMER_FALLBACK_SECONDS)
+    fired = await mark_clinic_call_finished(
+        search_id=search_id,
+        source=source,
+        outcome="completed",
+    )
+    if fired:
+        logger.info(
+            "Timer fallback marked clinic call complete for %s/%s after %.0fs",
+            search_id,
+            source,
+            _CLINIC_CALL_TIMER_FALLBACK_SECONDS,
+        )
+
+
+def _clinic_call_failure_message(outcome: str) -> str:
+    if outcome == "timeout":
+        return "clinic call completion was not received"
+    if outcome == "missing":
+        return "clinic call was not started"
+    return "clinic call ended before waitlist confirmation"
 
 
 async def _patient_callback(
@@ -172,7 +236,7 @@ async def _patient_callback(
     source: str,
     waitlist_message: str,
 ) -> None:
-    """Call the patient as soon as a clinic successfully confirms the waitlist."""
+    """Call the patient after the clinic conversation ends."""
     async with SessionLocal() as session:
         search = await session.get(Search, search_id)
         if search is None:
@@ -185,36 +249,53 @@ async def _patient_callback(
         logger.info("no patient phone for search %s — skipping callback", search_id)
         return
 
-    if not settings.elevenlabs_api_key or not settings.elevenlabs_agent_id:
+    if not settings.elevenlabs_api_key:
         logger.info("ElevenLabs not configured — skipping patient callback for %s", search_id)
         return
 
-    try:
-        from app.agents.voice_caller import place_outbound_call  # local import avoids circular deps
+    from app.agents.voice_caller import place_outbound_call
 
-        conversation_id = await place_outbound_call(
-            phone_number=patient_phone,
-            clinic_name=confirmed_clinic,
-            insurance_type=insurance_type,
-            search_id=search_id,
-            source=source,
-            extra_dynamic_variables={
-                "call_type": "patient_callback",
-                "patient_language": language,
-                "result_message": waitlist_message,
-            },
-        )
-        logger.info(
-            "Patient callback queued for search %s — conversation_id=%s — clinic=%s",
-            search_id,
-            conversation_id,
-            confirmed_clinic,
-        )
-    except Exception as exc:
-        logger.warning("Patient callback failed (non-fatal): %s", exc)
+    for attempt in range(1, _PATIENT_CALLBACK_RETRIES + 1):
+        try:
+            conversation_id = await place_outbound_call(
+                phone_number=patient_phone,
+                clinic_name=confirmed_clinic,
+                insurance_type=insurance_type,
+                search_id=search_id,
+                source=source,
+                extra_dynamic_variables={
+                    "call_type": "patient_callback",
+                    "patient_language": language,
+                    "result_message": waitlist_message,
+                },
+                agent_id_override=settings.elevenlabs_patient_agent_id or None,
+                phone_number_id_override=settings.elevenlabs_patient_phone_number_id or None,
+            )
+            logger.info(
+                "Patient callback queued for search %s — conversation_id=%s — clinic=%s",
+                search_id,
+                conversation_id,
+                confirmed_clinic,
+            )
+            return
+        except Exception as exc:
+            if attempt == _PATIENT_CALLBACK_RETRIES:
+                logger.warning(
+                    "Patient callback failed after %s attempts (non-fatal): %s",
+                    attempt,
+                    exc,
+                )
+                return
+            logger.warning(
+                "Patient callback attempt %s failed; retrying in %.0fs: %s",
+                attempt,
+                _PATIENT_CALLBACK_RETRY_DELAY_SECONDS,
+                exc,
+            )
+            await asyncio.sleep(_PATIENT_CALLBACK_RETRY_DELAY_SECONDS)
 
 
-# entry point — runs all 5 sources in parallel; ODHF confirmation triggers callback
+# entry point — runs all 5 sources in parallel
 async def run_fake_search(search_id: UUID) -> None:
     patient_callback_triggered = asyncio.Event()
     patient_callback_lock = asyncio.Lock()
@@ -232,7 +313,6 @@ async def run_fake_search(search_id: UUID) -> None:
         )
     )
 
-    # mark the parent search row completed
     async with SessionLocal() as session:
         search = await session.get(Search, search_id)
         if search is not None:
