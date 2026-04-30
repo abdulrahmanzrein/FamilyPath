@@ -5,7 +5,8 @@ import { AgentGrid } from '@/components/AgentGrid'
 import type { AgentSource, AgentStatus } from '@/hooks/useSearchWebSocket'
 import { useSearchWebSocket } from '@/hooks/useSearchWebSocket'
 import { startSearch } from '@/api/client'
-import { Heart, MapPin, Search, PhoneCall, ClipboardList, ShieldCheck, Stethoscope, ArrowRight, CheckCircle2, Phone, Globe2, Lock, Sparkles, Loader2 } from 'lucide-react'
+import { Heart, MapPin, Search, PhoneCall, ClipboardList, ShieldCheck, Stethoscope, ArrowRight, CheckCircle2, Phone, Globe2, Lock, Sparkles, Loader2, Mic } from 'lucide-react'
+import { useVoiceConversation } from '@/voice/elevenlabs'
 
 type Page = 'home' | 'find'
 
@@ -29,6 +30,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
 
   const { agents, connected } = useSearchWebSocket(searchId)
+  const voice = useVoiceConversation()
+  const hasVoiceAgent = Boolean(import.meta.env.VITE_ELEVENLABS_AGENT_ID)
 
   // Build a map keyed by source for the AgentGrid
   const agentMap = agents.reduce<Partial<Record<AgentSource, AgentStatus>>>((acc, a) => {
@@ -105,7 +108,7 @@ function App() {
                   Search your family doctor
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform duration-200" />
                 </Button>
-                <Button variant="ghost" className="px-6 py-3.5 h-auto rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-100 active:bg-slate-200 transition-all duration-200 inline-flex items-center gap-2">
+                <Button variant="ghost" onClick={() => setPage('find')} className="px-6 py-3.5 h-auto rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-100 active:bg-slate-200 transition-all duration-200 inline-flex items-center gap-2">
                   <Phone className="w-4 h-4" />
                   Talk to a navigator
                 </Button>
@@ -297,6 +300,61 @@ function App() {
                 <Lock className="w-3 h-3" />
                 Your information stays private and encrypted.
               </p>
+
+              <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="shrink-0 w-8 h-8 rounded-lg bg-violet-100 border border-violet-200 flex items-center justify-center">
+                      <Mic className="w-4 h-4 text-violet-800" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900">Voice navigator</p>
+                      <p className="text-[11px] text-slate-600 truncate">Speak with the assistant — mic access required</p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-violet-800 bg-violet-100 px-2 py-0.5 rounded-full capitalize">{voice.status}</span>
+                </div>
+                {!hasVoiceAgent ? (
+                  <p className="text-[11px] text-slate-600 leading-relaxed">Add <span className="font-mono text-[10px]">VITE_ELEVENLABS_AGENT_ID</span> to <span className="font-mono text-[10px]">frontend/.env</span>, restart Vite.</p>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 border-violet-300 bg-white hover:bg-violet-50 text-violet-900"
+                        onClick={() => void voice.start()}
+                        disabled={voice.status === 'connecting' || voice.status === 'listening' || voice.status === 'speaking'}
+                      >
+                        <Mic className="w-3.5 h-3.5" />
+                        Start talking
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-slate-700"
+                        onClick={() => void voice.stop()}
+                        disabled={voice.status === 'idle'}
+                      >
+                        Stop
+                      </Button>
+                    </div>
+                    <div className="max-h-28 overflow-y-auto text-[11px] space-y-2 bg-white rounded-lg border border-violet-100 p-2.5 leading-snug">
+                      {voice.messages.length === 0 ? (
+                        <p className="text-slate-400">Conversation transcript appears here.</p>
+                      ) : (
+                        voice.messages.map((m, i) => (
+                          <p key={i} className={m.role === 'user' ? 'text-slate-800' : 'text-violet-900'}>
+                            <span className="font-semibold">{m.role === 'user' ? 'You' : 'Assistant'}:</span> {m.text}
+                          </p>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {searched && (
