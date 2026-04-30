@@ -44,6 +44,7 @@ async def start_search(
     # blow up with a foreign key violation.
     search = Search(
         user_name=body.name,
+        phone=body.phone or None,
         postal_code=body.postal_code,
         language=body.language,
         insurance_type=body.insurance_type,

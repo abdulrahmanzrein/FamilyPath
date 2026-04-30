@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 # what the form sends when the user clicks "find me a doctor"
 class SearchStartRequest(BaseModel):
     name: str  # PII — nexos.ai will strip this before any Claude call
+    phone: str = ""  # patient callback number — used after search to confirm matches
     postal_code: str
     language: str
     insurance_type: Literal["ohip", "ifhp", "uhip", "waiting_period"]

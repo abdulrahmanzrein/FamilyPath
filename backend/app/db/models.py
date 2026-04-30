@@ -38,6 +38,7 @@ class Search(Base):
 
     search_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_name: Mapped[str] = mapped_column(String)  # PII — nexos.ai strips this before any Claude call
+    phone: Mapped[str | None] = mapped_column(String, nullable=True)  # patient callback number
     postal_code: Mapped[str] = mapped_column(String)
     language: Mapped[str] = mapped_column(String)
     insurance_type: Mapped[str] = mapped_column(String)  # ohip | ifhp | uhip | waiting_period
